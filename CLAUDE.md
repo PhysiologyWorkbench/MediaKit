@@ -17,11 +17,19 @@ That fact is why this repo exists instead of a DeviceCore extension.
 
 ## Status
 
-**Design record only — no code, no Package.swift yet.** The design was settled
-by argument on 2026-08-12 and is in [ARCHITECTURE.md](ARCHITECTURE.md); the
-build order was not, so there is no ROADMAP. The first act of code here should
-also settle the package's platform floors (SpeechAnalyzer wants macOS/iOS 26;
-everything else reaches back years).
+**First code exists (2026-08-12): microphone capture and a word-spotting
+reducer**, built for PWB's voice annotation channel — `MicrophoneCapture`
+(explicit arm/disarm, drop-oldest chunk stream), `WordSpotter`
+(SpeechTranscriber, final results, word-onset timestamps), and the pure pieces
+under them (`VocabularyMatcher`, `AudioClockAnchor`, `LabelEvent`).
+
+The platform floors are settled: the package floor is **macOS 14 / iOS 17** —
+the app's floor, and the family's highest package floor (siblings sit at
+13/16) — and only `WordSpotter` is gated `@available(macOS 26.0, iOS 26.0, *)`.
+Build and test: `swift build && swift test`, no hardware, no OS 26 needed.
+
+Still no ROADMAP; the wider build order remains open in
+[ARCHITECTURE.md](ARCHITECTURE.md).
 
 ## Constraints
 

@@ -7,10 +7,12 @@ those buffers into low-volume plain-data streams. The signal plane — the app's
 everything here ends where plain data begins.
 
 This document is the durable design of **this library**, written before any of
-it is code — deliberately, because the shape was settled by argument
-(2026-08-12) and the build order was not. The system-wide picture is in the
-**PWB** repo's ARCHITECTURE.md. There is no ROADMAP yet; the feature order is
-an open question below, not an accident.
+it was code — deliberately, because the shape was settled by argument
+(2026-08-12) and the build order was not. The first code (same date) is the
+microphone-capture → word-spotter path serving PWB's voice annotations; the
+rest remains design. The system-wide picture is in the **PWB** repo's
+ARCHITECTURE.md. There is no ROADMAP yet; the feature order is an open
+question below, not an accident.
 
 ## Where this sits
 
@@ -89,7 +91,7 @@ were never going to be our code, with one small exception:
 | --- | --- | --- |
 | Skeleton | Vision body pose (2D/3D requests) | OS |
 | Asana label | Create ML action classifier over skeletons, trained on own labelled video | OS tooling, own data |
-| Speech → labels | SpeechAnalyzer (macOS/iOS 26+) **or** WhisperKit (MIT) — trial both on Sanskrit vocabulary | OS / OSS |
+| Speech → labels | SpeechAnalyzer (macOS/iOS 26+) **or** WhisperKit (MIT) — trial both on Sanskrit vocabulary. The word spotter (built) uses SpeechTranscriber; the Sanskrit trial remains open | OS / OSS |
 | Sound classes | SoundAnalysis, plus Create ML custom classifiers | OS |
 | Calibration envelope | vDSP band energy / envelope | OS, ~a page |
 | rPPG | POS (Wang et al. 2016) and CHROM (de Haan 2013), ported **from the papers**, provenance-pinned | ours, small |
@@ -135,20 +137,26 @@ currently lacks.
 
 ## Open questions
 
-- **Feature order.** Deliberately unset; no ROADMAP until it is. The
-  actuator-calibration mic path (replacing `tools/`-side Python) is the likely
-  first consumer: offline-ish, no privacy exposure, and it pairs commanded
-  setpoints with acoustic response over seams that already exist.
-- **Platform floors.** Vision and AVFoundation reach back years; SpeechAnalyzer
-  needs macOS/iOS 26. Whether the package sets one floor or gates the speech
-  reducer by availability is unresolved.
+- **Feature order.** Still no ROADMAP. The first consumer turned out to be
+  **voice annotations** (2026-08-12) — spoken vocabulary words as subjective
+  marks for PWB — not the actuator-calibration mic path the earlier guess
+  named; that path remains a likely early follower. What comes after is
+  deliberately unset.
+- **Platform floors — resolved (2026-08-12).** The package floor is macOS 14 /
+  iOS 17: the app's floor, and the family's highest package floor (siblings
+  sit at 13/16). Only the speech reducer is gated
+  `@available(macOS 26.0, iOS 26.0, *)`; everything else compiles at the floor.
 - **Where non-physiology plain-data algorithms live.** Asana classification
   over joint angles is not physiology; whether PhysioKit broadens or a sibling
   appears is a naming question deferred until the code exists.
-- **Label events in the family vocabulary.** `(time, label, confidence)` is the
-  one addition the app's channel vocabulary needs; whose type it is — the
-  app's, per apps-first, until a second consumer — is expected but not settled.
+- **Label events in the family vocabulary — resolved (2026-08-12).**
+  `LabelEvent` `(time, label, confidence)` is **this library's** public output
+  type; the app's thin adapter maps it onto an app channel (PWB:
+  `.voiceAnnotation` → the `voice_annotations` text stream). No family repo
+  gained a shared type; nothing here depends on the app.
 - **Raw audio's resting place.** A 48 kHz mono regular stream in HDF5 is
   feasible (~350 MB/h at 16-bit) and would make audio fully replay-≡-live; a
   compressed sidecar is smaller and matches video. Undecided, and it can stay
-  per-session.
+  per-session. Note the consequence already shipped: v1 voice annotations
+  record **no raw audio**, so the `voice_annotations` stream is not
+  re-derivable — the app replays it from disk like any subjective mark.
