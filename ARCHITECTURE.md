@@ -120,6 +120,10 @@ effect. This plane's mirror image, held just as hard:
 
 - **Nothing captures as a side effect.** Opening a view never starts a camera
   or a microphone; capture is armed explicitly and is visible while armed.
+  Visible means *live*, not merely stated: capture publishes the input level of
+  every buffer it takes, so a hot microphone is legible as movement on screen
+  rather than as a label claiming it is on. The level is peak magnitude, the
+  cheapest honest answer, computed on the tap thread without allocating.
 - **Raw media never lands in HDF5.** Derived, low-volume streams do. Raw AV is
   a sidecar, armed separately from the sensor being live, **default off** —
   raw audio and video of a session are categorically more sensitive than any

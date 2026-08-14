@@ -19,7 +19,8 @@ That fact is why this repo exists instead of a DeviceCore extension.
 
 **First code exists (2026-08-12): microphone capture and a word-spotting
 reducer**, built for PWB's voice annotation channel — `MicrophoneCapture`
-(explicit arm/disarm, drop-oldest chunk stream), `WordSpotter`
+(explicit arm/disarm, drop-oldest chunk stream, published input level),
+`WordSpotter`
 (SpeechTranscriber, final results, word-onset timestamps), and the pure pieces
 under them (`VocabularyMatcher`, `AudioClockAnchor`, `LabelEvent`).
 
