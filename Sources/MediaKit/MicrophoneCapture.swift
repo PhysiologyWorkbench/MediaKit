@@ -22,6 +22,11 @@ public final class MicrophoneCapture {
 
     public private(set) var state: State = .idle
 
+    /// Peak magnitude of the most recent buffer, 0…1, and 0 while idle. The
+    /// operator's evidence that the microphone is hearing something — which is
+    /// a smaller claim than a word having been recognised, and arrives sooner.
+    public private(set) var level: Float = 0
+
     private var engine: AVAudioEngine?
     private var continuation: AsyncStream<AudioChunk>.Continuation?
 
@@ -49,7 +54,9 @@ public final class MicrophoneCapture {
         let engine = AVAudioEngine()
         let (stream, continuation) = AsyncStream.makeStream(
             of: AudioChunk.self, bufferingPolicy: .bufferingNewest(16))
-        let relay = TapRelay(continuation: continuation)
+        let relay = TapRelay(continuation: continuation) { [weak self] level in
+            Task { @MainActor in self?.level = level }
+        }
         // `@Sendable` keeps the tap out of this actor's isolation. Without it the
         // literal inherits `@MainActor` from `arm()`, and AVFAudio's realtime
         // messenger queue trips the executor check on the first buffer.
@@ -81,6 +88,7 @@ public final class MicrophoneCapture {
         engine.stop()
         continuation?.finish()
         continuation = nil
+        level = 0
         #if os(iOS)
         try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
         #endif
@@ -92,10 +100,13 @@ public final class MicrophoneCapture {
 /// `anchor` is touched only from the tap's serial callbacks.
 private final class TapRelay: @unchecked Sendable {
     private let continuation: AsyncStream<AudioChunk>.Continuation
+    private let onLevel: @Sendable (Float) -> Void
     private var anchor: AudioClockAnchor?
 
-    init(continuation: AsyncStream<AudioChunk>.Continuation) {
+    init(continuation: AsyncStream<AudioChunk>.Continuation,
+         onLevel: @escaping @Sendable (Float) -> Void) {
         self.continuation = continuation
+        self.onLevel = onLevel
     }
 
     func relay(buffer: AVAudioPCMBuffer, when: AVAudioTime) {
@@ -110,6 +121,22 @@ private final class TapRelay: @unchecked Sendable {
         } else {
             start = Date()
         }
+        onLevel(peakMagnitude(of: buffer))
         continuation.yield(AudioChunk(buffer: buffer, start: start))
     }
+}
+
+/// Largest absolute sample across every channel, or 0 for a buffer that is not
+/// float PCM. Called on the tap thread, so it allocates nothing.
+func peakMagnitude(of buffer: AVAudioPCMBuffer) -> Float {
+    guard let channels = buffer.floatChannelData else { return 0 }
+    let stride = buffer.stride
+    var peak: Float = 0
+    for channel in 0..<Int(buffer.format.channelCount) {
+        let samples = channels[channel]
+        for frame in 0..<Int(buffer.frameLength) {
+            peak = max(peak, abs(samples[frame * stride]))
+        }
+    }
+    return peak
 }
