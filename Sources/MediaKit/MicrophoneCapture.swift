@@ -50,7 +50,10 @@ public final class MicrophoneCapture {
         let (stream, continuation) = AsyncStream.makeStream(
             of: AudioChunk.self, bufferingPolicy: .bufferingNewest(16))
         let relay = TapRelay(continuation: continuation)
-        engine.inputNode.installTap(onBus: 0, bufferSize: 4096, format: nil) { buffer, when in
+        // `@Sendable` keeps the tap out of this actor's isolation. Without it the
+        // literal inherits `@MainActor` from `arm()`, and AVFAudio's realtime
+        // messenger queue trips the executor check on the first buffer.
+        engine.inputNode.installTap(onBus: 0, bufferSize: 4096, format: nil) { @Sendable buffer, when in
             relay.relay(buffer: buffer, when: when)
         }
         do {
