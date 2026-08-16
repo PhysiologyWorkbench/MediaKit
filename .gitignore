@@ -4,3 +4,5 @@
 xcuserdata/
 *.xcuserstate
 .vscode/
+NOW.md
+.tap-probe-grids/

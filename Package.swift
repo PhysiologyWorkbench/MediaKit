@@ -9,6 +9,8 @@ let package = Package(
     ],
     targets: [
         .target(name: "MediaKit"),
+        .executableTarget(name: "tap-probe", dependencies: ["MediaKit"],
+                          exclude: ["README.md"]),
         .testTarget(name: "MediaKitTests", dependencies: ["MediaKit"])
     ]
 )
