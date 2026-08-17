@@ -29,7 +29,10 @@ capture and beat tracking**, built for Tactus — `ProcessTapCapture` (Core
 Audio process tap, macOS 14.4+, macOS-only), the pure DSP cores
 (`OnsetEnvelope`, `estimateTempo`, `beatTimesDP`, `BeatPhasePredictor`, all
 paper-ported), the `BeatTracker` reducer, and the `tap-probe` bench harness
-where all Spotify-specific code lives. Design record in
+where all Spotify-specific code lives. `analyseAudioFile` (2026-08-17) is the
+offline facade over the same cores for local files — decode to mono, envelope,
+tempo, DP grid, per-beat strength — added for Tactus's local-file mode and
+iOS-clean. Design record in
 [BEAT-TRACKING.md](BEAT-TRACKING.md) (a rewrite starts there), spike and
 bench record in [SPOTIFY-BEAT.md](SPOTIFY-BEAT.md).
 

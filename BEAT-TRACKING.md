@@ -84,6 +84,7 @@ reported position) out of the beat path entirely.
 | `beatTimesDP` | `Sources/MediaKit/BeatAnalysis.swift` | Ellis 2007 offline grid |
 | `BeatPhasePredictor` | `Sources/MediaKit/BeatPhasePredictor.swift` | causal predictor: adaptive onset threshold, grid nudged 0.25 of the error, emits `horizon` (300 ms) early, goes silent below confidence 0.25 |
 | `BeatTracker` | `Sources/MediaKit/BeatTracker.swift` | the reducer: chunks in, `BeatEvent (time, period, confidence)` out, retune ≥ 1 s cadence over an 8 s window once ≥ 4 s exists, `envelopeSnapshot()` for offline analysis |
+| `analyseAudioFile` | `Sources/MediaKit/AudioFileBeats.swift` | offline facade for local files (added 2026-08-17 for Tactus Phase 1): decode → mono → envelope → tempo → DP grid → per-beat strength; carries the 0.25 emission floor because whole-file rubato autocorrelates at ~0.18, above the estimator's own 0.15 |
 | `tap-probe` | `Sources/tap-probe/` | bench harness; **all** Spotify-specific code lives here — notification channel, AppleScript fallback, JSON grid store, `--click`, `--csv`, `--measure-position`, gap-restart > 250 ms, grid only from segments ≥ 30 s |
 
 Tests: 38, no hardware — synthetic click tracks, per-component tests, and
