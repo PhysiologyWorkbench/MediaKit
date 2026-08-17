@@ -10,7 +10,10 @@ This document is the durable design of **this library**, written before any of
 it was code — deliberately, because the shape was settled by argument
 (2026-08-12) and the build order was not. The first code (same date) is the
 microphone-capture → word-spotter path serving PWB's voice annotations; the
-rest remains design. The system-wide picture is in the **PWB** repo's
+second (2026-08-16/17, bench-validated against Spotify) is system-audio
+capture → beat tracking, serving Tactus — design record in
+[BEAT-TRACKING.md](BEAT-TRACKING.md), spike record in
+[SPOTIFY-BEAT.md](SPOTIFY-BEAT.md); the rest remains design. The system-wide picture is in the **PWB** repo's
 ARCHITECTURE.md. There is no ROADMAP yet; the feature order is an open
 question below, not an accident.
 
@@ -46,6 +49,21 @@ Beside DeviceCore, never above or below it. The cut between the two:
 
 If a bespoke GATT device ever streams audio, it is a vendor kit over DeviceCore
 like any other, feeding this plane's reducers from the far side. The cut holds.
+
+**Other apps' audio is an OS-terminated sensor too.** Core Audio process taps
+(macOS 14.4+) deliver one process's decoded output as PCM —
+`ProcessTapCapture`, the third capture source beside microphone and camera,
+macOS-only by platform design (iOS has no cross-app capture). The same
+arm/disarm, published-level and drop-oldest rules apply; the Web-API and
+DRM routes that made this the surviving path to streamed music are recorded
+in BEAT-TRACKING.md. Track *recognition* is deliberately not this library's:
+the Spotify notification channel lives in the probe/app layer, and ShazamKit
+`SHCustomCatalog` fingerprinting is the documented future player-agnostic
+route. One operational hazard is load-bearing enough to restate here: **any
+host of a capture must exempt itself from App Nap**
+(`ProcessInfo.beginActivity`) or be a foreground app — a throttled process
+receives corrupted audio that no gap detection can see (LESSONS.md,
+2026-08-16).
 
 ## Two planes, deliberately different economics
 
@@ -95,6 +113,7 @@ were never going to be our code, with one small exception:
 | Sound classes | SoundAnalysis, plus Create ML custom classifiers | OS |
 | Calibration envelope | vDSP band energy / envelope | OS, ~a page |
 | rPPG | POS (Wang et al. 2016) and CHROM (de Haan 2013), ported **from the papers**, provenance-pinned | ours, small |
+| Onset / tempo / beat (built) | own vDSP DSP: band-limited flux, autocorrelation with Ellis-2007 tempo weighting, DP grid (Ellis 2007), causal predictor (concepts: Stark, Davies & Plumbley 2009) — ported **from the papers**; BTrack/aubio/madmom/Essentia are licence-tainted, librosa (ISC) is the validation oracle | ours, small |
 | Steps / cadence | CoreMotion (`CMPedometer`) | OS |
 
 Notes that are decisions, not trivia:
@@ -150,9 +169,13 @@ currently lacks.
   iOS 17: the app's floor, and the family's highest package floor (siblings
   sit at 13/16). Only the speech reducer is gated
   `@available(macOS 26.0, iOS 26.0, *)`; everything else compiles at the floor.
-- **Where non-physiology plain-data algorithms live.** Asana classification
-  over joint angles is not physiology; whether PhysioKit broadens or a sibling
-  appears is a naming question deferred until the code exists.
+- **Where non-physiology plain-data algorithms live — half resolved
+  (2026-08-17).** Beat tracking is not physiology, and it landed **here**:
+  a reducer whose input is a media-plane stream belongs to the media plane,
+  whatever its output means. `BeatEvent` is plain data; everything
+  Spotify-shaped stayed in the probe. The remaining half — algorithms over
+  *already-plain* data, asana classification over joint angles first among
+  them — is still a naming question deferred until the code exists.
 - **Label events in the family vocabulary — resolved (2026-08-12).**
   `LabelEvent` `(time, label, confidence)` is **this library's** public output
   type; the app's thin adapter maps it onto an app channel (PWB:

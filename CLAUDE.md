@@ -24,9 +24,19 @@ reducer**, built for PWB's voice annotation channel — `MicrophoneCapture`
 (SpeechTranscriber, final results, word-onset timestamps), and the pure pieces
 under them (`VocabularyMatcher`, `AudioClockAnchor`, `LabelEvent`).
 
+**Second path (2026-08-16/17, bench-validated against Spotify): system-audio
+capture and beat tracking**, built for Tactus — `ProcessTapCapture` (Core
+Audio process tap, macOS 14.4+, macOS-only), the pure DSP cores
+(`OnsetEnvelope`, `estimateTempo`, `beatTimesDP`, `BeatPhasePredictor`, all
+paper-ported), the `BeatTracker` reducer, and the `tap-probe` bench harness
+where all Spotify-specific code lives. Design record in
+[BEAT-TRACKING.md](BEAT-TRACKING.md) (a rewrite starts there), spike and
+bench record in [SPOTIFY-BEAT.md](SPOTIFY-BEAT.md).
+
 The platform floors are settled: the package floor is **macOS 14 / iOS 17** —
 the app's floor, and the family's highest package floor (siblings sit at
-13/16) — and only `WordSpotter` is gated `@available(macOS 26.0, iOS 26.0, *)`.
+13/16) — `WordSpotter` is gated `@available(macOS 26.0, iOS 26.0, *)` and
+`ProcessTapCapture` `@available(macOS 14.4, *)`.
 Build and test: `swift build && swift test`, no hardware, no OS 26 needed.
 
 Still no ROADMAP; the wider build order remains open in
