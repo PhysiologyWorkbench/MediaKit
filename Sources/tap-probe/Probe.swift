@@ -204,8 +204,17 @@ final class ProbeSession {
         let now = Date()
         if now.timeIntervalSince(lastHealthReport) >= 2 {
             let rate = Double(buffers) / now.timeIntervalSince(lastHealthReport)
-            print(String(format: "capture  %.0f buf/s  peak %.2f  gaps %d",
-                         rate, peakLevel, gaps))
+            var tracked = "-"
+            if let snapshot = segment?.tracker.envelopeSnapshot() {
+                // Shadow of BeatTracker's own retune input, for bench debugging.
+                let window = Array(snapshot.frames.suffix(Int(snapshot.frameRate * 8)))
+                let estimate = estimateTempo(envelope: window, frameRate: snapshot.frameRate)
+                tracked = String(format: "%.1f s  tempo %@",
+                                 Double(snapshot.frames.count) / snapshot.frameRate,
+                                 estimate.map { String(format: "%.1f/%.2f", $0.bpm, $0.confidence) } ?? "nil")
+            }
+            print(String(format: "capture  %.0f buf/s  peak %.2f  gaps %d  env %@",
+                         rate, peakLevel, gaps, tracked))
             buffers = 0
             peakLevel = 0
             lastHealthReport = now

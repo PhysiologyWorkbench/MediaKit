@@ -27,7 +27,7 @@ enough. Plan of record: `~/.claude/plans/lively-dancing-key.md`.
 - `Sources/tap-probe/` — bench harness; all Spotify-specific code lives there
   (notification channel, AppleScript fallback, JSON grid store, `--click`,
   `--csv`, `--measure-position`). See its README.
-- 36 tests, 9 suites, no hardware needed, including a five-minute synthetic
+- 38 tests, 9 suites, no hardware needed, including a five-minute synthetic
   phase-lock regression over the full envelope→retune→predictor loop.
 
 ## Bench record, 2026-08-16 (120 BPM metronome track)
@@ -50,10 +50,41 @@ enough. Plan of record: `~/.claude/plans/lively-dancing-key.md`.
   re-locks within seconds, but a grid must come from a segment ended by pause
   or track change, never one spanning a loop.
 
-## Still open at the bench
+## Bench record, 2026-08-17 (real music; every protocol leg run)
 
-Grid save on pause (≥ 30 s) and replay grid-hit with faster lock; the
-drum-forward electronic, funk and rubato tracks (rubato must refuse, not
-invent); volume-independence; `swift run tap-probe --measure-position` for the
-AppleScript position-precision number Tactus ROADMAP Phase 3 wants. Then the
-owner's verdict: good enough → docs step; not → scrap, per the plan.
+Three library defects found and fixed, each with a regression test:
+
+- **Warm start died.** After a grid hit the prior (conf 0.40) emitted 2 beats,
+  then retunes from a 1–2.4 s window — nil, or octave-folded at conf 0.97 —
+  displaced it and the track went silent. Fix: no retune until the envelope
+  holds ≥ 4 s. Retest: first click 0.6 s after play versus 3.6 s cold.
+- **Alternate-beat bass flips the octave.** "Around the World" locked 121.3,
+  then the bassline (alternate beats) made the half-tempo comb genuinely
+  stronger: 60.6 BPM, wrong grid saved. Fix: log-Gaussian lag weighting
+  centred on 120 BPM, σ 0.9 octaves (Ellis 2007), in the fold scoring only —
+  confidence stays the raw correlation. Retest: 121.4 for 78 s, bass present
+  throughout.
+- **Rubato leaked clicks.** Chopin Nocturne op. 9/2: offline refusal correct,
+  but wandering live estimates at conf 0.15–0.23 crested the 0.15 emission
+  floor in bursts. Fix: floor raised to 0.25 — measured gap: rubato leaks
+  peaked at 0.23, the weakest legitimate groove tested (Superstition, conf
+  0.28–0.85, tempo breathing 96.8–102.6) never dipped below 0.28. Retest:
+  zero clicks through the whole Nocturne, refusal message at pause.
+
+Verification is log-based, not by-ear (owner's ear low-confidence on real
+music): live emitted beats against the hindsight DP grid on the same envelope
+clock — Around the World 152/152 beats within 28 ms (median −14 ms);
+Superstition 93% within ±70 ms, outliers at the breaks.
+
+Other legs: grid save/hit on the metronome (119.9 BPM, conf 0.99; warm lock
+0.6 s). Volume independence: system output volume invisible to the tap (peak
+flat while swept); Spotify's own slider swept to zero and back moved peak
+0.00–0.12 while lock held at conf ≥ 0.59, no beat interval above 0.52 s.
+AppleScript `player position`: worst position-vs-wall jitter 68 ms over 50
+polls, mean `osascript` round trip 217 ms (spikes to 837 ms) — treat a polled
+position as ±100 ms and never poll on the beat path.
+
+## Still open
+
+The owner's verdict: good enough → docs step (MediaKit ARCHITECTURE/CLAUDE,
+Tactus SCOPE/ROADMAP, board card) — not → scrap, per the plan.
