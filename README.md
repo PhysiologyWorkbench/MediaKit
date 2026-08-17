@@ -38,7 +38,7 @@ swift run tap-probe --click   # taps Spotify by default, clicks on predicted bea
 ## Using the package
 
 ```swift
-.package(url: "https://github.com/PhysiologyWorkbench/MediaKit", from: "0.1.0")
+.package(url: "https://github.com/PhysiologyWorkbench/MediaKit", from: "0.0.1")
 ```
 
 Platform floors macOS 14 / iOS 17, Swift 6 language mode, strict concurrency.
