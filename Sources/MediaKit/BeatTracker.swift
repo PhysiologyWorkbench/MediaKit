@@ -78,7 +78,10 @@ public final class BeatTracker {
                                         confidence: beat.confidence))
                 }
             }
-            if frames.count - lastRetune >= Int(envelope.frameRate) {
+            // A window under ~4 s is not evidence: it octave-folds confidently
+            // or refuses outright, and either would wrongly displace a prior.
+            if frames.count - lastRetune >= Int(envelope.frameRate),
+               frames.count >= Int(envelope.frameRate * 4) {
                 lastRetune = frames.count
                 let window = Array(frames.suffix(Int(envelope.frameRate * 8)))
                 predictor.retune(estimateTempo(envelope: window, frameRate: envelope.frameRate))

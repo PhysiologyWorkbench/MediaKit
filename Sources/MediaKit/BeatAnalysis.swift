@@ -37,7 +37,17 @@ public func estimateTempo(envelope: [Float], frameRate: Double)
     var normalised = [Float](repeating: 0, count: 2 * maxLag + 2)
     for lag in lags { normalised[lag] = correlation(lag) / variance }
 
-    func score(_ lag: Int) -> Float { normalised[lag] + 0.5 * normalised[2 * lag] }
+    // Log-Gaussian weighting centred on 120 BPM (Ellis 2007, σ 0.9 octaves):
+    // between octave-related folds with comparable comb energy — a bassline
+    // striking alternate beats makes the half-tempo lag genuinely stronger —
+    // prefer the danceable one. A bias, not a rule: clear evidence outvotes it.
+    func weight(_ lag: Int) -> Float {
+        let octaves = log2(2 * Double(lag) / frameRate)
+        return Float(exp(-0.5 * pow(octaves / 0.9, 2)))
+    }
+    func score(_ lag: Int) -> Float {
+        weight(lag) * (normalised[lag] + 0.5 * normalised[2 * lag])
+    }
 
     var bestLag = minLag
     for lag in minLag...maxLag where score(lag) > score(bestLag) { bestLag = lag }

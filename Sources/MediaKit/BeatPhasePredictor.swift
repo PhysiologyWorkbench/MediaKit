@@ -29,7 +29,10 @@ public struct BeatPhasePredictor {
     private var deviation: Double = 0
     private var previousValue: Float = 0
 
-    private static let emissionFloor = 0.15
+    // Calibrated at the Spotify bench (2026-08-17): rubato piano leaks weak
+    // wandering estimates up to ~0.23; the weakest legitimate groove tested
+    // (Superstition) never dipped below 0.28.
+    private static let emissionFloor = 0.25
 
     public init(horizon: TimeInterval = 0.3, bpm: Double? = nil) {
         self.horizon = horizon

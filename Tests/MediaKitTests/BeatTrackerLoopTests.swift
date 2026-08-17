@@ -29,7 +29,8 @@ struct BeatTrackerLoopTests {
                     emitted.append(beat.time)
                 }
             }
-            if frames.count - lastRetune >= Int(envelope.frameRate) {
+            if frames.count - lastRetune >= Int(envelope.frameRate),
+               frames.count >= Int(envelope.frameRate * 4) {
                 lastRetune = frames.count
                 let window = Array(frames.suffix(Int(envelope.frameRate * 8)))
                 predictor.retune(estimateTempo(envelope: window, frameRate: envelope.frameRate))
@@ -47,5 +48,46 @@ struct BeatTrackerLoopTests {
         first error \(Int((errors.first ?? 0) * 1000)) ms, \
         last error \(Int((errors.last ?? 0) * 1000)) ms
         """)
+    }
+
+    /// The Spotify bench (2026-08-17) showed a warm start dying: retunes fired
+    /// before the window held enough audio, and their nil or octave-folded
+    /// results displaced the prior that was carrying the beats.
+    @Test("a tempo prior carries beats gaplessly until real estimates arrive")
+    func warmStartSustains() {
+        let bpm = 120.0
+        let audio = clickTrack(bpm: bpm, seconds: 20)
+        let envelope = OnsetEnvelope(sampleRate: 48_000)
+        var predictor = BeatPhasePredictor(bpm: bpm)
+        var frames: [Float] = []
+        var lastRetune = 0
+        var emitted: [(time: TimeInterval, period: TimeInterval)] = []
+
+        let block = 24_000
+        var index = 0
+        while index < audio.count {
+            let slice = Array(audio[index..<min(index + block, audio.count)])
+            index += block
+            for value in envelope.process(slice) {
+                let time = envelope.timeOffset + Double(frames.count) / envelope.frameRate
+                frames.append(value)
+                if let beat = predictor.step(value: value, time: time) {
+                    emitted.append((beat.time, beat.period))
+                }
+            }
+            if frames.count - lastRetune >= Int(envelope.frameRate),
+               frames.count >= Int(envelope.frameRate * 4) {
+                lastRetune = frames.count
+                let window = Array(frames.suffix(Int(envelope.frameRate * 8)))
+                predictor.retune(estimateTempo(envelope: window, frameRate: envelope.frameRate))
+            }
+        }
+
+        let period = 60 / bpm
+        #expect((emitted.first?.time ?? .infinity) < 2 * period, "warm start locked late")
+        let intervals = zip(emitted.dropFirst(), emitted).map { $0.time - $1.time }
+        #expect((intervals.max() ?? .infinity) < 1.5 * period, "beats dropped out mid-track")
+        #expect(emitted.allSatisfy { abs($0.period - period) < 0.1 * period },
+                "an octave-folded estimate displaced the prior")
     }
 }
