@@ -121,7 +121,7 @@ final class ProbeSession {
     private var buffers = 0
     private var gaps = 0
     private var peakLevel: Float = 0
-    private var expectedNextStart: Date?
+    private var lastActedGap: BeatTracker.StreamGap?
     private var lastHealthReport = Date()
 
     init(options: Options) {
@@ -130,13 +130,6 @@ final class ProbeSession {
     }
 
     func run() async {
-        // A background CLI is an App Nap candidate; a napped consumer stalls,
-        // the drop-oldest buffers shed chunks, and the tracker sees gaps.
-        let activity = ProcessInfo.processInfo.beginActivity(
-            options: [.userInitiated, .latencyCritical],
-            reason: "tap-probe audio capture")
-        defer { ProcessInfo.processInfo.endActivity(activity) }
-
         let chunks: AsyncStream<AudioChunk>
         do {
             chunks = try capture.arm(bundleIdentifier: options.bundleIdentifier)
@@ -176,27 +169,8 @@ final class ProbeSession {
 
     private func handle(chunk: AudioChunk) async {
         buffers += 1
-        let chunkSeconds = Double(chunk.buffer.frameLength) / chunk.buffer.format.sampleRate
-        if let expected = expectedNextStart {
-            let gap = chunk.start.timeIntervalSince(expected)
-            if abs(gap) > 0.002 {
-                gaps += 1
-                print(String(format: "⚠ frame gap: %.1f ms", gap * 1000))
-                // Lost audio skews the tracker's sample-count clock for good
-                // (BeatTracker assumes a gapless stream); re-anchor by
-                // restarting the segment. trackStart is host-clock and the
-                // track kept playing, so it survives the restart.
-                if abs(gap) > 0.25, let current = segment {
-                    print("  restarting tracker after capture gap")
-                    await endSegment(analyse: false)
-                    beginSegment(uri: current.uri, name: current.name,
-                                 artist: current.artist, duration: current.duration,
-                                 trackStart: current.trackStart)
-                }
-            }
-        }
-        expectedNextStart = chunk.start.addingTimeInterval(chunkSeconds)
         segment?.continuation.yield(chunk)
+        await actOnGaps()
         // Peak since the last report — the instantaneous level almost always
         // samples the silence between metronome clicks.
         peakLevel = max(peakLevel, capture.level)
@@ -213,11 +187,34 @@ final class ProbeSession {
                                  Double(snapshot.frames.count) / snapshot.frameRate,
                                  estimate.map { String(format: "%.1f/%.2f", $0.bpm, $0.confidence) } ?? "nil")
             }
-            print(String(format: "capture  %.0f buf/s  peak %.2f  gaps %d  env %@",
-                         rate, peakLevel, gaps, tracked))
+            print(String(format: "capture  %.0f buf/s  peak %.2f  gaps %d  skew %.0f ppm  env %@",
+                         rate, peakLevel, gaps, capture.integrity.skewPPM, tracked))
             buffers = 0
             peakLevel = 0
             lastHealthReport = now
+        }
+    }
+
+    /// The tracker detects discontinuities; the policy of what to do about
+    /// one is the host's, and this is it. Reported a chunk or two after the
+    /// fact, since the segment's tracker consumes the forwarded stream
+    /// asynchronously — immaterial to a restart that discards the tracker.
+    private func actOnGaps() async {
+        guard let current = segment, let gap = current.tracker.lastGap,
+              gap != lastActedGap
+        else { return }
+        lastActedGap = gap
+        gaps += 1
+        print(String(format: "⚠ frame gap: %.1f ms", gap.seconds * 1000))
+        // Lost audio skews the tracker's frame-count clock for good; re-anchor
+        // by restarting the segment. trackStart is host-clock and the track
+        // kept playing, so it survives the restart.
+        if abs(gap.seconds) > 0.25 {
+            print("  restarting tracker after capture gap")
+            await endSegment(analyse: false)
+            beginSegment(uri: current.uri, name: current.name,
+                         artist: current.artist, duration: current.duration,
+                         trackStart: current.trackStart)
         }
     }
 

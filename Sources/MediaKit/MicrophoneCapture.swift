@@ -29,6 +29,7 @@ public final class MicrophoneCapture {
 
     private var engine: AVAudioEngine?
     private var continuation: AsyncStream<AudioChunk>.Continuation?
+    private var activity: NSObjectProtocol?
 
     public init() {}
 
@@ -74,6 +75,13 @@ public final class MicrophoneCapture {
 
         self.engine = engine
         self.continuation = continuation
+        // A throttled host stalls the consumer and the drop-oldest buffers
+        // shed chunks. The microphone is hardware-clocked, so only that
+        // visible class is at stake here — but the library asserts for the
+        // extent of its own capture rather than leaving it to every host.
+        activity = ProcessInfo.processInfo.beginActivity(
+            options: [.userInitiated, .latencyCritical],
+            reason: "MediaKit microphone capture")
         state = .armed
         continuation.onTermination = { _ in
             Task { @MainActor in self.disarm() }
@@ -88,6 +96,10 @@ public final class MicrophoneCapture {
         engine.stop()
         continuation?.finish()
         continuation = nil
+        if let activity {
+            ProcessInfo.processInfo.endActivity(activity)
+            self.activity = nil
+        }
         level = 0
         #if os(iOS)
         try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)

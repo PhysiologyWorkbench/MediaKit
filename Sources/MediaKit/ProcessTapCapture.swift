@@ -33,6 +33,29 @@ public final class ProcessTapCapture {
     /// operator's evidence that the tap is hearing something.
     public private(set) var level: Float = 0
 
+    /// How far the tap's sample clock has drifted from the host clock. A
+    /// process tap's clock is synthesised by this process, so a throttled
+    /// capture receives stretched audio with unbroken sample time: skew is the
+    /// only observable signature of it (CAPTURE-INTEGRITY.md). Detection only
+    /// — what to do about a fault is the host's to decide.
+    public struct ClockIntegrity: Equatable, Sendable {
+        /// Skew over the most recent window, positive when the sample clock
+        /// ran ahead. Genuine clocks sit within a few ppm.
+        public let skewPPM: Double
+        /// Windows whose skew exceeded `skewThresholdPPM` since arming.
+        public let faults: Int
+    }
+
+    public private(set) var integrity = ClockIntegrity(skewPPM: 0, faults: 0)
+
+    /// Beyond a few hundred ppm the clocks are not merely imprecise; the
+    /// benched corruption ran at ~1100.
+    public static let skewThresholdPPM: Double = 300
+
+    /// Long enough that per-callback timestamp jitter averages out of the
+    /// rate comparison.
+    public static let skewWindow: TimeInterval = 10
+
     private struct Resources {
         let tapID: AudioObjectID
         let aggregateID: AudioObjectID
@@ -41,6 +64,7 @@ public final class ProcessTapCapture {
 
     private var resources: Resources?
     private var continuation: AsyncStream<AudioChunk>.Continuation?
+    private var activity: NSObjectProtocol?
 
     public init() {}
 
@@ -82,12 +106,26 @@ public final class ProcessTapCapture {
 
             let (stream, continuation) = AsyncStream.makeStream(
                 of: AudioChunk.self, bufferingPolicy: .bufferingNewest(16))
-            let relay = ProcessTapRelay(format: format, continuation: continuation) { [weak self] level in
-                Task { @MainActor in self?.level = level }
-            }
+            let relay = ProcessTapRelay(
+                format: format, continuation: continuation,
+                skewWindow: Self.skewWindow,
+                onLevel: { [weak self] level in
+                    Task { @MainActor in self?.level = level }
+                },
+                onSkew: { [weak self] ppm in
+                    Task { @MainActor in
+                        guard let self else { return }
+                        let faults = self.integrity.faults
+                            + (abs(ppm) > Self.skewThresholdPPM ? 1 : 0)
+                        self.integrity = ClockIntegrity(skewPPM: ppm, faults: faults)
+                    }
+                })
 
             var procID: AudioDeviceIOProcID?
-            let queue = DispatchQueue(label: "MediaKit.ProcessTapCapture")
+            // Audio-adjacent work: explicit QoS keeps the IO queue out of the
+            // throttled band and away from priority inversion.
+            let queue = DispatchQueue(label: "MediaKit.ProcessTapCapture",
+                                      qos: .userInteractive)
             // `@Sendable` keeps the block out of this actor's isolation, as
             // with the microphone tap: the IO proc fires on `queue`, not here.
             let procStatus = AudioDeviceCreateIOProcIDWithBlock(&procID, aggregateID, queue) {
@@ -109,6 +147,14 @@ public final class ProcessTapCapture {
 
             resources = Resources(tapID: tapID, aggregateID: aggregateID, procID: procID)
             self.continuation = continuation
+            // A throttled process receives corrupted audio that no gap
+            // detection can see, and the tap is the exposed case: its
+            // aggregate device is hosted here, so throttling this process
+            // throttles the device. The library asserts for the exact extent
+            // of the capture rather than leaving it to every host.
+            activity = ProcessInfo.processInfo.beginActivity(
+                options: [.userInitiated, .latencyCritical],
+                reason: "MediaKit process tap capture")
             state = .armed
             continuation.onTermination = { _ in
                 Task { @MainActor in self.disarm() }
@@ -132,7 +178,12 @@ public final class ProcessTapCapture {
         AudioHardwareDestroyProcessTap(resources.tapID)
         continuation?.finish()
         continuation = nil
+        if let activity {
+            ProcessInfo.processInfo.endActivity(activity)
+            self.activity = nil
+        }
         level = 0
+        integrity = ClockIntegrity(skewPPM: 0, faults: 0)
         state = .idle
     }
 
@@ -193,21 +244,31 @@ public final class ProcessTapCapture {
 }
 
 /// Bridges the aggregate device's IO queue to the chunk stream. `@unchecked
-/// Sendable`: `anchor` is touched only from the IO proc's serial queue. Unlike
+/// Sendable`: `window` is touched only from the IO proc's serial queue. Unlike
 /// the microphone relay this one copies — the HAL owns its buffer list only
 /// for the duration of the callback, and a yielded chunk must outlive it.
 private final class ProcessTapRelay: @unchecked Sendable {
     private let format: AVAudioFormat
     private let continuation: AsyncStream<AudioChunk>.Continuation
     private let onLevel: @Sendable (Float) -> Void
-    private var anchor: AudioClockAnchor?
+    private let onSkew: @Sendable (Double) -> Void
+    private let skewWindow: TimeInterval
+    /// Established at arm time, not at the first callback, so no chunk start
+    /// carries the scheduling latency of whichever callback happened to be it.
+    private let hostClock = HostClock()
+    /// Start of the open skew window: the two clocks' readings at its edge.
+    private var window: (sampleTime: Double, hostTicks: UInt64)?
 
     init(format: AVAudioFormat,
          continuation: AsyncStream<AudioChunk>.Continuation,
-         onLevel: @escaping @Sendable (Float) -> Void) {
+         skewWindow: TimeInterval,
+         onLevel: @escaping @Sendable (Float) -> Void,
+         onSkew: @escaping @Sendable (Double) -> Void) {
         self.format = format
         self.continuation = continuation
+        self.skewWindow = skewWindow
         self.onLevel = onLevel
+        self.onSkew = onSkew
     }
 
     func relay(bufferList: UnsafePointer<AudioBufferList>,
@@ -229,19 +290,29 @@ private final class ProcessTapRelay: @unchecked Sendable {
         }
 
         let stamp = timestamp.pointee
-        let start: Date
-        if stamp.mFlags.contains(.sampleTimeValid) {
-            let anchor = self.anchor
-                ?? AudioClockAnchor(sampleTime: AVAudioFramePosition(stamp.mSampleTime),
-                                    sampleRate: format.sampleRate,
-                                    hostDate: Date())
-            self.anchor = anchor
-            start = anchor.date(forSampleTime: AVAudioFramePosition(stamp.mSampleTime))
-        } else {
-            start = Date()
+        let hostTimeValid = stamp.mFlags.contains(.hostTimeValid)
+        let start = hostTimeValid
+            ? hostClock.date(forHostTime: stamp.mHostTime)
+            : Date()
+
+        if hostTimeValid, stamp.mFlags.contains(.sampleTimeValid) {
+            measureSkew(sampleTime: stamp.mSampleTime, hostTicks: stamp.mHostTime)
         }
         onLevel(peakMagnitude(of: copy))
         continuation.yield(AudioChunk(buffer: copy, start: start))
+    }
+
+    /// Compares what the two clocks say has elapsed, once per closed window.
+    private func measureSkew(sampleTime: Double, hostTicks: UInt64) {
+        guard let open = window else {
+            window = (sampleTime, hostTicks)
+            return
+        }
+        let hostSeconds = hostClock.seconds(from: open.hostTicks, to: hostTicks)
+        guard hostSeconds >= skewWindow else { return }
+        onSkew(clockSkewPPM(audioSeconds: (sampleTime - open.sampleTime) / format.sampleRate,
+                            hostSeconds: hostSeconds))
+        window = (sampleTime, hostTicks)
     }
 }
 #endif

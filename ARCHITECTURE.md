@@ -59,11 +59,13 @@ DRM routes that made this the surviving path to streamed music are recorded
 in BEAT-TRACKING.md. Track *recognition* is deliberately not this library's:
 the Spotify notification channel lives in the probe/app layer, and ShazamKit
 `SHCustomCatalog` fingerprinting is the documented future player-agnostic
-route. One operational hazard is load-bearing enough to restate here: **any
-host of a capture must exempt itself from App Nap**
-(`ProcessInfo.beginActivity`) or be a foreground app — a throttled process
-receives corrupted audio that no gap detection can see (LESSONS.md,
-2026-08-16).
+route. One operational hazard is load-bearing enough to restate here: a throttled
+process receives corrupted audio that no gap detection can see (LESSONS.md,
+2026-08-16). **The captures assert against App Nap for themselves** —
+`ProcessInfo.beginActivity([.userInitiated, .latencyCritical])` is held from
+`arm()` to `disarm()`, so a host need do nothing; the tap additionally
+publishes the sample-versus-host clock skew that is the only signature of
+being throttled anyway (CAPTURE-INTEGRITY.md).
 
 ## Two planes, deliberately different economics
 

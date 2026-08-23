@@ -9,10 +9,28 @@ import Observation
 /// owning a device keeps replay ≡ live: a recorded sidecar runs through this
 /// exactly as capture does.
 ///
-/// Times assume the stream is gapless after its first chunk; chunks dropped
-/// by the capture side put the envelope clock behind the wall clock.
+/// Times assume the stream is gapless after its first chunk: the envelope
+/// clock counts frames, so audio the capture side dropped puts every later
+/// time early by the missing span. The tracker enforces that assumption by
+/// checking it — `gapCount` and `lastGap` report every discontinuity — and
+/// leaves recovery to the host, whose call it is whether to restart.
 @MainActor @Observable
 public final class BeatTracker {
+    /// A discontinuity between one chunk's end and the next chunk's start.
+    public struct StreamGap: Equatable, Sendable {
+        /// Start of the chunk that arrived out of step.
+        public let at: Date
+        /// Audio missing (positive) or overlapping (negative), in seconds.
+        public let seconds: TimeInterval
+    }
+
+    /// Chunk-start discrepancy below which the stream counts as continuous.
+    /// Timestamp jitter lives well under this; a shed buffer well over it.
+    public static let gapTolerance: TimeInterval = 0.002
+
+    public private(set) var gapCount = 0
+    public private(set) var lastGap: StreamGap?
+
     private let tempoPrior: Double?
     private var frames: [Float] = []
     private var frameRate: Double = 0
@@ -56,8 +74,18 @@ public final class BeatTracker {
         var predictor = BeatPhasePredictor(bpm: tempoPrior)
         var streamStart: Date?
         var lastRetune = 0
+        var expectedNextStart: Date?
         for await chunk in chunks {
             if Task.isCancelled { return }
+            if let expected = expectedNextStart {
+                let gap = chunk.start.timeIntervalSince(expected)
+                if abs(gap) > Self.gapTolerance {
+                    gapCount += 1
+                    lastGap = StreamGap(at: chunk.start, seconds: gap)
+                }
+            }
+            expectedNextStart = chunk.start.addingTimeInterval(
+                Double(chunk.buffer.frameLength) / chunk.buffer.format.sampleRate)
             let envelope: OnsetEnvelope
             if let detector {
                 envelope = detector
