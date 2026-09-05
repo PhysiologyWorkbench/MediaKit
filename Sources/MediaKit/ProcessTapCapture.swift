@@ -1,4 +1,7 @@
 #if os(macOS)
+// AppKit for `NSRunningApplication` alone — the bundle-identifier-to-pid
+// lookup the tap needs, no UI. Named exception to the family rule that a
+// library imports no UI framework (ruled 2026-09-05: baseline, not a seam).
 import AppKit
 import AVFoundation
 import CoreAudio
