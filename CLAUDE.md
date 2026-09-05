@@ -123,3 +123,11 @@ with engine choices, and the open questions (feature order first among them).
 [LESSONS.md](LESSONS.md) — dated lessons; none yet.
 The system-wide picture is in the **PWB** repo's ARCHITECTURE.md; the device
 I/O layer this repo sits beside is in **DeviceCore**'s.
+
+## The architecture gate
+
+Family-wide architecture rules run as a pre-push hook in every repo. After
+any structural change here — imports added, public types added, isolation
+attributes changed — run
+`swift test --package-path ../PWB/tools/arch/ArchRules`; fix or get a ruling,
+never bypass silently. Setup and detail: `../PWB/TOOLING.md`.
